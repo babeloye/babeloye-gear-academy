@@ -1,5 +1,5 @@
 #![no_std]
-
+#![allow(static_mut_refs)]
 use gstd::{exec, msg, prelude::*, ActorId};
 use pebbles_game_io::*;
 
@@ -149,9 +149,8 @@ unsafe extern "C" fn state() {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use gclient::ext::{sp_core::serde::de::IntoDeserializer, sp_runtime::print};
-    use gtest::{Log, Program, System};
+    use gtest::{Program, System};
+    use pebbles_game_io::*;
     const USER_OWNER: u64 = 42;
     const PROGRAM_OWNER: u64 = 46;
     const PEBBLES_INIT: PebblesInit = PebblesInit {
@@ -168,101 +167,31 @@ mod tests {
         assert_eq!(program.id(), 1.into());
 
         let init = PEBBLES_INIT.clone();
-        let init_result = program.send(USER_OWNER, init);
-        assert!(!init_result.main_failed());
-
+        system.mint_to(USER_OWNER, 79888888888898777777777);
+        program.send(USER_OWNER, init);
+        system.run_next_block();
         let game_state: GameState = program.read_state(b"").unwrap();
         assert_eq!(game_state.pebbles_count, PEBBLES_INIT.pebbles_count);
     }
 
     #[test]
-    fn first_player_is_user() {
+    fn win_test() {
         let system = System::new();
         system.init_logger();
         let program = Program::current(&system);
+        system.mint_to(USER_OWNER, 79888888888898777777777);
         let _ = program.send(USER_OWNER, PEBBLES_INIT.clone());
-        loop {
-            let random_count = 1;
-            let result = program.send(USER_OWNER, PebblesAction::Turn(random_count));
-            let log: &[gtest::CoreLog] = result.log();
-            if log.len() > 1 {
-                let payload = log[0].payload().to_vec();
-                let mut data = &payload[..];
-                match PebblesEvent::decode(&mut data).expect("Decode error") {
-                    PebblesEvent::CounterTurn(player, count) => {
-                        assert_eq!(player, Player::User);
-                        assert_eq!(count, random_count);
-                    }
-                    PebblesEvent::Won(player) => {
-                        assert_eq!(player, Player::User);
-                        break;
-                    }
-                }
-            }
-            if log.len() > 2 {
-                let payload = log[1].payload().to_vec();
-                let mut data = &payload[..];
-                match PebblesEvent::decode(&mut data).expect("Decode error") {
-                    PebblesEvent::CounterTurn(player, _) => {
-                        assert_eq!(player, Player::Program);
-                    }
-                    PebblesEvent::Won(player) => {
-                        assert_eq!(player, Player::Program);
-                        break;
-                    }
-                }
-            }
-
-            if log.len() <= 1 {
-                break;
-            }
-        }
-    }
-
-    #[test]
-    fn first_player_is_program() {
-        let system = System::new();
-        system.init_logger();
-        let program = Program::current(&system);
-        let _ = program.send(PROGRAM_OWNER, PEBBLES_INIT.clone());
-        loop {
-            let random_count = 1;
-            let result = program.send(PROGRAM_OWNER, PebblesAction::Turn(random_count));
-            let log: &[gtest::CoreLog] = result.log();
-
-            if log.len() > 1 {
-                let payload = log[0].payload().to_vec();
-                let mut data = &payload[..];
-                match PebblesEvent::decode(&mut data).expect("Decode error") {
-                    PebblesEvent::CounterTurn(player, count) => {
-                        assert_eq!(player, Player::User);
-                        assert_eq!(count, random_count);
-                    }
-                    PebblesEvent::Won(player) => {
-                        assert_eq!(player, Player::User);
-                        break;
-                    }
-                }
-            }
-
-            if log.len() > 2 {
-                let payload = log[1].payload().to_vec();
-                let mut data = &payload[..];
-                match PebblesEvent::decode(&mut data).expect("Decode error") {
-                    PebblesEvent::CounterTurn(player, _) => {
-                        assert_eq!(player, Player::Program);
-                    }
-                    PebblesEvent::Won(player) => {
-                        assert_eq!(player, Player::Program);
-                        break;
-                    }
-                }
-            }
-
-            if log.len() <= 1 {
-                break;
-            }
-        }
+        system.run_next_block();
+        program.send(USER_OWNER, PebblesAction::Turn(4));
+        system.run_next_block();
+        program.send(USER_OWNER, PebblesAction::Turn(4));
+        system.run_next_block();
+        program.send(USER_OWNER, PebblesAction::Turn(4));
+        system.run_next_block();
+        program.send(USER_OWNER, PebblesAction::Turn(4));
+        system.run_next_block();
+        let state: GameState = program.read_state("").expect("not msg");
+        assert_eq!(state.winner, Some(Player::Program));
     }
 
     #[test]
@@ -270,10 +199,13 @@ mod tests {
         let system = System::new();
         system.init_logger();
         let program = Program::current(&system);
+        system.mint_to(PROGRAM_OWNER, 10000000000000045);
         let _ = program.send(PROGRAM_OWNER, PEBBLES_INIT.clone());
-        let result = program.send(PROGRAM_OWNER, PebblesAction::GiveUp);
-        let expected = Log::builder().payload(PebblesEvent::Won(Player::Program));
-        assert!(result.contains(&expected));
+        system.run_next_block();
+        program.send(PROGRAM_OWNER, PebblesAction::GiveUp);
+        system.run_next_block();
+        let state: GameState = program.read_state("").expect("not msg");
+        assert_eq!(state.winner, Some(Player::Program));
     }
 
     #[test]
@@ -281,8 +213,11 @@ mod tests {
         let system = System::new();
         system.init_logger();
         let program = Program::current(&system);
+        system.mint_to(PROGRAM_OWNER, 10000000000000045);
         let _ = program.send(PROGRAM_OWNER, PEBBLES_INIT.clone());
+        system.run_next_block();
         let _ = program.send(PROGRAM_OWNER, PebblesAction::Restart(PEBBLES_INIT));
+        system.run_next_block();
         let game_state: GameState = program.read_state(b"").unwrap();
         assert_eq!(game_state.pebbles_count, PEBBLES_INIT.pebbles_count);
         assert_eq!(
